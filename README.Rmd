@@ -89,20 +89,23 @@ Once you are done setting up the project, you can now start working with the MET
 
 1. Load the `data.table` (and the `dtplyr` and `dplyr` packages).
 
-```{r}
+2. Load the met data from https://raw.githubusercontent.com/JSC370/JSC370-2024/main/data/met_all_2023.gz, and also the station data. For the latter, you can use the code we used during lecture to pre-process the stations data:
+
+```{r, include = FALSE}
 library(data.table)
 library(leaflet)
 library(tidyverse)
 library(lubridate)
 library(dplyr)
 library(ggplot2)
+library(tidyr)
+library(dtplyr)
+library(kableExtra)
+library(mgcv)
 ```
 
 
-
-2. Load the met data from https://raw.githubusercontent.com/JSC370/JSC370-2024/main/data/met_all_2023.gz, and also the station data. For the latter, you can use the code we used during lecture to pre-process the stations data:
-
-```{r stations-data, eval = FALSE}
+```{r stations-data, eval = TRUE,warning=FALSE, message=FALSE, error=FALSE}
 # Download the data
 stations <- fread("isd-history.csv")
 stations[, USAF := as.integer(USAF)]
@@ -214,13 +217,9 @@ mid_point <- met[, .(
 
 ```{r}
 mid <- merge(x=met, y=mid_point, by = "STATE")
-```
-
-```{r}
 mid[,mid_eudist := sqrt((lon-lon_50)^2 + (lat-lat_50)^2)]
 
 ```
-
 
 ```{r}
 
@@ -256,7 +255,22 @@ Start by computing the states' average temperature. Use that measurement to clas
 - High: temp >= 25
 
 ```{r}
+state_avg_temp <- met[, .(avg_temp = mean(temp, na.rm = TRUE)), by = STATE]
 
+state_avg_temp[, temp_level := fifelse(
+  avg_temp < 20, "Low",
+  fifelse(avg_temp < 25, "Mid", "High")
+)]
+
+summary_table <- met[state_avg_temp, on = "STATE", nomatch = 0][, .(
+  num_entries = .N,
+  num_na_entries = sum(is.na(temp) | is.na(wind.sp) | is.na(atm.press)),
+  num_stations = uniqueN(USAFID),
+  num_states = uniqueN(STATE),
+  mean_temp = mean(temp, na.rm = TRUE),
+  mean_wind_sp = mean(wind.sp, na.rm = TRUE),
+  mean_atm_press = mean(atm.press, na.rm = TRUE)
+), by = temp_level]
 ```
 
 Once you are done with that, you can compute the following:
@@ -270,6 +284,9 @@ Once you are done with that, you can compute the following:
 All by the levels described before.
 
 ```{r}
+kable(summary_table, booktabs = TRUE) %>%
+  kable_styling(font_size = 10) %>%
+  kable_paper("hover", full_width = FALSE)
 
 ```
 
@@ -285,5 +302,27 @@ Let's practice running regression models with smooth functions on X. We need the
 - fit both a linear model and a spline model (use `gam()` with a cubic regression spline on wind speed). Summarize and plot the results from the models and interpret which model is the best fit and why.
 
 ```{r}
+station_med_lt <- lazy_dt(station_med)
+station_med_lt <- station_med_lt|>
+  filter(between(atm.press,1000,1020)) |>
+  collect()
 
+ggplot(station_med_lt, aes(x=atm.press,y=temp)) +
+  geom_point()+
+  geom_smooth(method="lm", col='cyan')+
+  geom_smooth(method="gam", col='blue')
 ```
+
+```{r}
+lm_mod <-lm(temp~atm.press,data=station_med_lt)
+summary(lm_mod)
+
+gam_mod <- gam(temp~s(atm.press,bs="cr",k=20), data=station_med_lt)
+summary(gam_mod)
+plot(gam_mod)
+```
+
+
+
+
+
